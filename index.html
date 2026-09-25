@@ -3,77 +3,87 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Progetti di rigenerazione urbana, vulnerabilità ed esposizione al caldo</title>
+<title>Progetti Spazi a Colori, esposizione e vulnerabilità al caldo</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   html, body { height: 100%; margin: 0; font-family: "Segoe UI", sans-serif; }
   #map { height: 100%; }
+  /* basemap in scala di grigi: le tile OSM restano gratuite senza chiave */
+  .leaflet-tile-pane { filter: grayscale(100%) brightness(1.08) contrast(0.9); }
   .title { position: absolute; top: 12px; left: 56px; z-index: 1000; background: #fff;
            padding: 8px 14px; border: 1px solid #b8b8b8; font-size: 15px; max-width: 460px; }
-  .legend { background: #fff; padding: 8px 12px; border: 1px solid #b8b8b8; font-size: 12px; line-height: 1.4; }
+  .legend { max-height: calc(100vh - 40px); overflow-y: auto; background: #fff; padding: 8px 12px; border: 1px solid #b8b8b8; font-size: 12px; line-height: 1.4; }
   .legend h4 { margin: 0 0 6px 0; font-size: 12px; font-weight: 600; }
+  .legend h4 + h4, .legend .block + h4 { margin-top: 10px; }
   .legend .row { display: flex; align-items: center; gap: 6px; }
-  .legend .sw { width: 14px; height: 14px; border: 1px solid #888; }
-  .legend .dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid #222; }
+  .legend .sw { width: 14px; height: 14px; border: 1px solid #888; flex: none; }
+  .legend .dot { width: 11px; height: 11px; border-radius: 50%; border: 1px solid #222; flex: none; margin: 0 1.5px; }
   .leaflet-control-layers label { font-size: 13px; }
 </style>
 </head>
 <body>
 <div id="map"></div>
-<div class="title">Progetti di rigenerazione urbana su vulnerabilità ed esposizione al caldo. Classi: 11 quantili.</div>
+<div class="title">Progetti Spazi a Colori su esposizione e vulnerabilità al caldo. Classi: 11 quantili.</div>
 <script>
 const HM30_BOUNDS = [[41.641982, 12.224526], [42.142639, 12.871082]];
 
 const map = L.map("map").setView([41.9, 12.5], 11);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-  { attribution: "&copy; OpenStreetMap, &copy; CARTO", maxZoom: 19 }).addTo(map);
+// ordine fisso di sovrapposizione: raster sotto, poligoni in mezzo, punti sempre sopra
+map.createPane("paneHm30"); map.getPane("paneHm30").style.zIndex = 300;
+map.createPane("paneVuln"); map.getPane("paneVuln").style.zIndex = 400;
+map.createPane("panePts");  map.getPane("panePts").style.zIndex = 500;
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  { attribution: "&copy; OpenStreetMap contributors", maxZoom: 19 }).addTo(map);
 
-// 11 classi (1 = bassa, 11 = alta)
-const PAL_VULN = ["#f7fbff","#e3eef9","#cfe1f2","#b5d4e9","#93c3df","#6daed5","#4b97c9","#2f7ebc","#1864aa","#0a4a90","#08306b"];
-const PAL_HEAT = ["#ffffcc","#fff1a9","#fee187","#feca66","#feab49","#fd8c3c","#fc5b2e","#ed2e21","#d41020","#b00026","#800026"];
+// Spectral, 11 classi: 1 = bassa (blu), 11 = alta (rosso)
+const PAL = ["#5e4fa2","#3288bd","#66c2a5","#abdda4","#e6f598","#ffffbf","#fee08b","#fdae61","#f46d43","#d53e4f","#9e0142"];
+const cl = v => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 11 ? Math.round(n) : null; };
 
 // Esposizione al caldo (raster come immagine)
-const hm30 = L.imageOverlay("data/hm30.png", HM30_BOUNDS, { opacity: 0.75 });
+const hm30 = L.imageOverlay("data/hm30.png", HM30_BOUNDS, { opacity: 0.75, pane: "paneHm30" });
 
 // Vulnerabilità (poligoni)
-const vuln = L.geoJSON(null, {
-  style: f => ({ fillColor: PAL_VULN[(f.properties.vuln_cl || 1) - 1], fillOpacity: 0.7, weight: 0.4, color: "#555" })
+const vuln = L.geoJSON(null, { pane: "paneVuln",
+  style: f => { const c = cl(f.properties.vuln_cl);
+    return { fillColor: c ? PAL[c - 1] : "#ddd", fillOpacity: 0.65, weight: 0.4, color: "#555" }; }
 });
 fetch("data/vuln.geojson").then(r => r.json()).then(d => vuln.addData(d));
 
-// Progetti, colorati per classe di vulnerabilità
-const pts = L.geoJSON(null, {
-  pointToLayer: (f, ll) => L.circleMarker(ll, {
-    radius: 6, weight: 1, color: "#222", fillOpacity: 0.95,
-    fillColor: f.properties.vuln_cl ? PAL_VULN[f.properties.vuln_cl - 1] : "#bbb" }),
+// Progetti Spazi a Colori, colorati per classe di esposizione al caldo
+const pts = L.geoJSON(null, { pane: "panePts",
+  pointToLayer: (f, ll) => { const c = cl(f.properties.hm30_cl);
+    return L.circleMarker(ll, { pane: "panePts", radius: 6.5, weight: 1.2, color: "#222", fillOpacity: 1,
+                                fillColor: c ? PAL[c - 1] : "#bbb" }); },
   onEachFeature: (f, l) => {
     const p = f.properties;
-    const hide = ["vuln_val","vuln_cl","hm30_val","hm30_cl"];
+    const hide = ["vuln_val","vuln_cl","vuln_dist","hm30_val","hm30_cl"];
     l.bindPopup(
       Object.entries(p).filter(([k, v]) => !hide.includes(k) && v !== null && v !== "")
         .map(([k, v]) => `<b>${k}</b>: ${v}`).join("<br>") +
-      `<br><b>Classe di vulnerabilità</b>: ${p.vuln_cl ?? "n.d."} su 11`);
+      `<br><b>Classe di esposizione al caldo</b>: ${cl(p.hm30_cl) ?? "n.d."} su 11` +
+      `<br><b>Classe di vulnerabilità</b>: ${cl(p.vuln_cl) ?? "n.d. (sezione senza residenti)"} su 11`);
   }
 });
 fetch("data/progetti.geojson").then(r => r.json()).then(d => pts.addData(d));
 
-vuln.addTo(map); pts.addTo(map);
+hm30.addTo(map); pts.addTo(map);   // vulnerabilita spenta all'apertura
 L.control.layers(null, {
+  "Progetti Spazi a Colori": pts,
   "Vulnerabilità al caldo": vuln,
-  "Esposizione al caldo": hm30,
-  "Progetti di rigenerazione": pts
+  "Esposizione al caldo": hm30
 }, { collapsed: false }).addTo(map);
 
-// Legende
+// Legende: sempre tutte e tre, in ordine punti, esposizione, vulnerabilita
 const legend = L.control({ position: "bottomright" });
-legend.onAdd = () => {
-  const d = L.DomUtil.create("div", "legend");
-  const rows = (pal, dot) => pal.map((c, i) =>
-    `<div class="row"><span class="${dot ? "dot" : "sw"}" style="background:${c}"></span>${i + 1}${i === 0 ? " (bassa)" : i === 10 ? " (alta)" : ""}</div>`).join("");
-  d.innerHTML = `<h4>Progetti e vulnerabilità, classi quantile</h4>${rows(PAL_VULN, false)}
-                 <h4 style="margin-top:10px">Esposizione al caldo, classi quantile</h4>${rows(PAL_HEAT, false)}`;
-  return d;
+const rows = shape => PAL.map((c, i) =>
+  `<div class="row"><span class="${shape}" style="background:${c}"></span>${i + 1}${i === 0 ? " (bassa)" : i === 10 ? " (alta)" : ""}</div>`).join("");
+legend.onAdd = () => { legend._div = L.DomUtil.create("div", "legend"); legend.update(); return legend._div; };
+legend.update = () => {
+  legend._div.innerHTML =
+    `<h4>Progetti Spazi a Colori, classe di esposizione al caldo</h4><div class="block">${rows("dot")}</div>` +
+    `<h4>Esposizione al caldo, classi quantile</h4><div class="block">${rows("sw")}</div>` +
+    `<h4>Vulnerabilità al caldo, classi quantile</h4><div class="block">${rows("sw")}</div>`;
 };
 legend.addTo(map);
 </script>
